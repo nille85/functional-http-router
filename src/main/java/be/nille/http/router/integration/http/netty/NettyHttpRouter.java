@@ -1,7 +1,9 @@
 package be.nille.http.router.integration.http.netty;
 
+import be.nille.http.router.domain.DefaultRouteDispatcher;
 import be.nille.http.router.domain.HttpRouter;
 import be.nille.http.router.domain.HttpRouterConfiguration;
+import be.nille.http.router.domain.RouteDispatcher;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
@@ -16,18 +18,18 @@ import org.slf4j.LoggerFactory;
 public class NettyHttpRouter implements HttpRouter {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NettyHttpRouter.class);
+
+
+    private final RouteDispatcher routeDispatcher;
     private final SslContextFactory sslContextFactory;
 
-    private NettyHttpRouter(SslContextFactory sslContextFactory) {
+    public NettyHttpRouter(RouteDispatcher routeDispatcher, SslContextFactory sslContextFactory) {
+        this.routeDispatcher = routeDispatcher;
         this.sslContextFactory = sslContextFactory;
     }
 
-    public static NettyHttpRouter create(SslContextFactory sslContextFactory) {
-        return new NettyHttpRouter(sslContextFactory);
-    }
-
-    public static HttpRouter create(){
-        return new NettyHttpRouter(new DefaultSslContextFactory());
+    public static HttpRouter create() {
+        return new NettyHttpRouter(new DefaultRouteDispatcher(), new DefaultSslContextFactory());
     }
 
     public void start(HttpRouterConfiguration configuration) {
@@ -41,7 +43,7 @@ public class NettyHttpRouter implements HttpRouter {
             b.group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
                     .handler(new LoggingHandler(LogLevel.INFO))
-                    .childHandler(new HttpServerInitializer(sslContext));
+                    .childHandler(new HttpServerInitializer(routeDispatcher, configuration, sslContext));
             Channel ch = b.bind(configuration.getPortNumber()).sync().channel();
             LOGGER.info("Open your web browser and navigate to " +
                     (useSSL ? "https" : "http") + "://127.0.0.1:" + portNumber + '/');

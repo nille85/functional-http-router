@@ -9,4 +9,11 @@ public class HttpServerException extends RuntimeException {
         );
 
     }
+
+    public HttpServerException(HttpServerExceptionCode code) {
+        super(
+                String.format("An HTTP server exception occurred, code: %s", code.name())
+        );
+
+    }
 }

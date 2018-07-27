@@ -17,8 +17,9 @@ public enum Method {
     }
 
     public static Optional<Method> byName(String name){
-        return Arrays.asList(Method.values()).stream()
-                .filter(value -> value.equals(name))
+        Optional<Method> methodOptional = Arrays.asList(Method.values()).stream()
+                .filter(method -> method.getName().equals(name))
                 .findFirst();
+        return methodOptional;
     }
 }

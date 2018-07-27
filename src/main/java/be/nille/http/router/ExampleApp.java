@@ -2,6 +2,7 @@ package be.nille.http.router;
 
 import be.nille.http.router.domain.*;
 import be.nille.http.router.integration.http.mock.MockRequestInvoker;
+import be.nille.http.router.integration.http.netty.NettyHttpRouter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,16 +24,10 @@ public class ExampleApp {
                 .build()
         );
 
-        MockRequestInvoker invoker = MockRequestInvoker.create(new HttpRouterConfiguration.Builder()
+        NettyHttpRouter.create().start(
+                new HttpRouterConfiguration.Builder()
                         .withRoutes(routes)
-                        .build());
-
-        LOGGER.info(invoker.sendRequest(new Request(Method.GET))
-                .map(Response::getValue)
-                .orElse("Request could not be matched with route"));
-
-        LOGGER.info(invoker.sendRequest(new Request(Method.POST))
-                .map(Response::getValue)
-                .orElse("Request could not be matched with route"));
+                        .build()
+        );
     }
 }

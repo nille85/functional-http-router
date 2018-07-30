@@ -1,6 +1,8 @@
 package be.nille.http.router.integration.http.netty;
 
 import be.nille.http.router.domain.*;
+import be.nille.http.router.exception.ErrorMessage;
+import be.nille.http.router.exception.Result;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
@@ -29,13 +31,12 @@ public class HttpRouterHandler extends SimpleChannelInboundHandler<Object> {
     private final HttpRouterConfiguration httpRouterConfiguration;
     private final Request.Builder requestBuilder;
     private final RouteDispatcher routeDispatcher;
-    private final StringBuilder bodyFuffer;
+
 
     public HttpRouterHandler(final HttpRouterConfiguration httpRouterConfiguration, Request.Builder requestBuilder, RouteDispatcher routeDispatcher) {
         this.httpRouterConfiguration = httpRouterConfiguration;
         this.requestBuilder = requestBuilder;
         this.routeDispatcher = routeDispatcher;
-        this.bodyFuffer = new StringBuilder();
     }
 
     public HttpRouterHandler(final HttpRouterConfiguration httpRouterConfiguration, final RouteDispatcher routeDispatcher) {
@@ -60,10 +61,6 @@ public class HttpRouterHandler extends SimpleChannelInboundHandler<Object> {
                 HttpRequest request = (HttpRequest) msg;
                 handleHttpRequest(ctx, request);
             }
-
-            /**
-             * This is a chunk of the body
-             */
             if (msg instanceof HttpContent) {
                 HttpContent httpContent = (HttpContent) msg;
                 handleHttpContent(ctx, httpContent);
@@ -81,30 +78,35 @@ public class HttpRouterHandler extends SimpleChannelInboundHandler<Object> {
                         e -> e.getValue()
                 ));
 
+        Result<Method> methodResult = Method.byName(httpRequest.method().name()).map(Result::ofSuccess)
+                .orElse(Result.ofFailure(ErrorMessage.of(HttpServerExceptionCode.UNSUPPORTED_METHOD.name(), ErrorMessage.Severity.WARNING)));
 
-        //TODO do not throw an error but write a bad request response
-        requestBuilder.method(Method.byName(httpRequest.method().name()).orElseThrow(
-                () -> new HttpServerException(HttpServerExceptionCode.UNSUPPORTED_METHOD)))
-                .uri(httpRequest.uri())
-                .headers(headers);
-
+        methodResult.fold(method -> {
+            requestBuilder.method(method)
+                    .uri(httpRequest.uri())
+                    .headers(headers);
+            return null;
+        }, failure -> {
+            FullHttpResponse fullHttpResponse = createBadRequestResponse(failure.getErrorMessage().getMessage());
+            ctx.write(fullHttpResponse);
+            ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            return null;
+        });
     }
 
     private void handleHttpContent(ChannelHandlerContext ctx, HttpContent httpContent) {
 
         ByteBuf content = httpContent.content();
         if (content.isReadable()) {
-            bodyFuffer.append(content.toString(CharsetUtil.UTF_8));
+            requestBuilder.addBodyChunk(content.toString(CharsetUtil.UTF_8));
         }
         if (httpContent instanceof LastHttpContent) {
-            Request request = requestBuilder.body(bodyFuffer.toString()).build();
+            Request request = requestBuilder.build();
             boolean isKeepAlive = isKeepAlive(request);
-
             Optional<Response> responseOptional = routeDispatcher.dispatch(request, httpRouterConfiguration);
-
             FullHttpResponse httpResponse = responseOptional.map(response ->
                     creatOkHttpResponse(response)
-            ).orElse(createBadRequestResponse());
+            ).orElse(createBadRequestResponse("No route available"));
             httpResponse = addKeepAliveHeadersAndCookies(httpResponse, request);
             // Write the response.
             ctx.write(httpResponse);
@@ -159,12 +161,13 @@ public class HttpRouterHandler extends SimpleChannelInboundHandler<Object> {
         return httpResponse;
     }
 
-    private FullHttpResponse createBadRequestResponse() {
+    private FullHttpResponse createBadRequestResponse(String reason) {
         FullHttpResponse httpResponse = new DefaultFullHttpResponse(
                 HTTP_1_1, BAD_REQUEST,
-                Unpooled.copiedBuffer("Bad Request", CharsetUtil.UTF_8));
+                Unpooled.copiedBuffer(String.format("Bad Request, Reason: %s", reason), CharsetUtil.UTF_8));
         return httpResponse;
     }
+
 
     private void writeInternalServerErrorResponse(ChannelHandlerContext channelHandlerContext, HttpServerExceptionCode httpServerExceptionCode) {
         FullHttpResponse fullHttpResponse = createInternalServerErrorResponse(httpServerExceptionCode);

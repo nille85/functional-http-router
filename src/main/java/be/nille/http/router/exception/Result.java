@@ -6,6 +6,8 @@ import java.util.function.Function;
 
 public class Result<T> {
 
+    private static final String NOT_A_FAILURE = "NOT_A_FAILURE";
+
     private final Optional<Success<T>> success;
     private final Optional<Failure> failure;
 
@@ -49,6 +51,32 @@ public class Result<T> {
         return isSuccess() ?
                 mapper.apply(success.get().getValue()):
                 Result.ofFailure(failure.get().getErrorMessage());
+    }
+
+    public <R> R mapBoth(Function<? super T, ? extends R> successMapper, Function<Failure, ? extends R> failureMapper){
+        R mappedSuccess = successMapper.apply(success.get().getValue());
+        R mappedFailure = failureMapper.apply(failure.get());
+        return isSuccess() ? mappedSuccess : mappedFailure;
+    }
+
+    public void fold(Function<? super T, Void> successCallback, Function<Failure, Void> failureCallback){
+        if (isSuccess()){
+            successCallback.apply(success.get().getValue());
+        }else{
+            failureCallback.apply(failure.get());
+        }
+    }
+
+    public void ifFailure(Function<Failure, Void> failureCallback){
+        if (isFailure()){
+            failureCallback.apply(failure.get());
+        }
+    }
+
+    public void ifSuccess(Function<? super T, Void> successCallback){
+        if (isSuccess()){
+            successCallback.apply(success.get().getValue());
+        }
     }
 
 }

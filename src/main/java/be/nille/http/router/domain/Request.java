@@ -1,15 +1,13 @@
 package be.nille.http.router.domain;
 
-import java.util.Map;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 
 public class Request {
 
     private final Method method;
     private final String uri;
     private final Map<String,String> headers;
-    private final Optional<String> body;
+    private final List<String> bodyChunks;
 
     private Request(Builder builder) {
         Objects.requireNonNull(builder.method, "Method should not be null");
@@ -18,7 +16,8 @@ public class Request {
         uri = builder.uri;
         Objects.requireNonNull(builder.headers, "Headers should not be null");
         headers = builder.headers;
-        body = Optional.ofNullable(builder.body);
+        Objects.requireNonNull(builder.bodyChunks);
+        bodyChunks = builder.bodyChunks;
     }
 
     public Method getMethod() {
@@ -33,6 +32,14 @@ public class Request {
         return headers;
     }
 
+    public List<String> getBodyChunks() {
+        return bodyChunks;
+    }
+
+    public String getBody(){
+        return String.join("", bodyChunks);
+    }
+
     public Optional<String> getHeaderValue(String headerName){
         return headers.entrySet().stream()
                 .filter(entry -> entry.getKey().equals(headerName))
@@ -44,9 +51,10 @@ public class Request {
         private Method method;
         private String uri;
         private Map<String, String> headers;
-        private String body;
+        private List<String> bodyChunks;
 
         public Builder() {
+            bodyChunks = new ArrayList<>();
         }
 
         public Builder method(Method val) {
@@ -64,8 +72,8 @@ public class Request {
             return this;
         }
 
-        public Builder body(String val){
-            body = val;
+        public Builder addBodyChunk(String val){
+            bodyChunks.add(val);
             return this;
         }
 

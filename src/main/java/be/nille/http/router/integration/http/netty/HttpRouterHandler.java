@@ -1,6 +1,8 @@
 package be.nille.http.router.integration.http.netty;
 
 import be.nille.http.router.domain.*;
+import be.nille.http.router.exception.ErrorMessage;
+import be.nille.http.router.exception.Result;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
@@ -15,7 +17,6 @@ import io.netty.util.CharsetUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -31,13 +32,14 @@ public class HttpRouterHandler extends SimpleChannelInboundHandler<Object> {
     private final Request.Builder requestBuilder;
     private final RouteDispatcher routeDispatcher;
 
+
     public HttpRouterHandler(final HttpRouterConfiguration httpRouterConfiguration, Request.Builder requestBuilder, RouteDispatcher routeDispatcher) {
         this.httpRouterConfiguration = httpRouterConfiguration;
         this.requestBuilder = requestBuilder;
         this.routeDispatcher = routeDispatcher;
     }
 
-    public HttpRouterHandler(final HttpRouterConfiguration httpRouterConfiguration, final RouteDispatcher routeDispatcher){
+    public HttpRouterHandler(final HttpRouterConfiguration httpRouterConfiguration, final RouteDispatcher routeDispatcher) {
         this(httpRouterConfiguration, new Request.Builder(), routeDispatcher);
     }
 
@@ -49,24 +51,24 @@ public class HttpRouterHandler extends SimpleChannelInboundHandler<Object> {
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Object msg) {
         LOGGER.debug(String.format("Reading a message from channel with id %s", ctx.channel().id().asShortText()));
-        if (msg instanceof HttpRequest) {
-            HttpRequest request = (HttpRequest) msg;
-            handleHttpRequest(ctx, request);
-        }
-
-        /**
-         * This is the body
-         */
-        if (msg instanceof HttpContent) {
-            HttpContent httpContent = (HttpContent) msg;
-            handleHttpContent(ctx, httpContent);
+        if (msg instanceof HttpObject) {
+            HttpObject httpObject = (HttpObject) msg;
+            if (!this.canBeDecoded(httpObject)) {
+                writeInternalServerErrorResponse(ctx, HttpServerExceptionCode.REQUEST_DECODING_EXCEPTION);
+                return;
+            }
+            if (msg instanceof HttpRequest) {
+                HttpRequest request = (HttpRequest) msg;
+                handleHttpRequest(ctx, request);
+            }
+            if (msg instanceof HttpContent) {
+                HttpContent httpContent = (HttpContent) msg;
+                handleHttpContent(ctx, httpContent);
+            }
         }
     }
 
     private void handleHttpRequest(ChannelHandlerContext ctx, HttpRequest httpRequest) {
-        if (!this.canBeDecoded(httpRequest)) {
-            throw new HttpServerException(HttpServerExceptionCode.REQUEST_DECODING_EXCEPTION);
-        }
         if (HttpUtil.is100ContinueExpected(httpRequest)) {
             send100Continue(ctx);
         }
@@ -76,41 +78,44 @@ public class HttpRouterHandler extends SimpleChannelInboundHandler<Object> {
                         e -> e.getValue()
                 ));
 
+        Result<Method> methodResult = Method.byName(httpRequest.method().name()).map(Result::ofSuccess)
+                .orElse(Result.ofFailure(ErrorMessage.of(HttpServerExceptionCode.UNSUPPORTED_METHOD.name(), ErrorMessage.Severity.WARNING)));
 
-        requestBuilder.method(Method.byName(httpRequest.method().name()).orElseThrow(
-                () -> new HttpServerException(HttpServerExceptionCode.UNSUPPORTED_METHOD)))
-                .uri(httpRequest.uri())
-                .headers(headers);
-
+        methodResult.fold(method -> {
+            requestBuilder.method(method)
+                    .uri(httpRequest.uri())
+                    .headers(headers);
+            return null;
+        }, failure -> {
+            FullHttpResponse fullHttpResponse = createBadRequestResponse(failure.getErrorMessage().getMessage());
+            ctx.write(fullHttpResponse);
+            ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+            return null;
+        });
     }
 
     private void handleHttpContent(ChannelHandlerContext ctx, HttpContent httpContent) {
-        if (!this.canBeDecoded(httpContent)) {
-            throw new HttpServerException(HttpServerExceptionCode.REQUEST_DECODING_EXCEPTION);
-        }
+
         ByteBuf content = httpContent.content();
         if (content.isReadable()) {
-            requestBuilder.body(content.toString(CharsetUtil.UTF_8));
+            requestBuilder.addBodyChunk(content.toString(CharsetUtil.UTF_8));
         }
-
         if (httpContent instanceof LastHttpContent) {
-            LastHttpContent trailer = (LastHttpContent) httpContent;
             Request request = requestBuilder.build();
             boolean isKeepAlive = isKeepAlive(request);
-            Optional<Response> responseOptional = routeDispatcher.dispatch(request,httpRouterConfiguration);
+            Optional<Response> responseOptional = routeDispatcher.dispatch(request, httpRouterConfiguration);
             FullHttpResponse httpResponse = responseOptional.map(response ->
-                 creatOkHttpResponse(trailer, response)
-            ).orElse(createBadRequestResponse());
+                    creatOkHttpResponse(response)
+            ).orElse(createBadRequestResponse("No route available"));
             httpResponse = addKeepAliveHeadersAndCookies(httpResponse, request);
             // Write the response.
             ctx.write(httpResponse);
-            if(!isKeepAlive){
+            if (!isKeepAlive) {
                 // If keep-alive is off, close the connection once the content is fully written.
                 ctx.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
             }
         }
     }
-
 
     private boolean canBeDecoded(HttpObject o) {
         DecoderResult result = o.decoderResult();
@@ -123,7 +128,7 @@ public class HttpRouterHandler extends SimpleChannelInboundHandler<Object> {
 
     }
 
-    private FullHttpResponse addKeepAliveHeadersAndCookies(FullHttpResponse httpResponse, Request request){
+    private FullHttpResponse addKeepAliveHeadersAndCookies(FullHttpResponse httpResponse, Request request) {
         FullHttpResponse copy = httpResponse.copy();
         boolean isKeepAlive = isKeepAlive(request);
         if (isKeepAlive) {
@@ -147,22 +152,36 @@ public class HttpRouterHandler extends SimpleChannelInboundHandler<Object> {
         return copy;
     }
 
-    private FullHttpResponse createBadRequestResponse(){
+    private FullHttpResponse creatOkHttpResponse(Response response) {
         FullHttpResponse httpResponse = new DefaultFullHttpResponse(
-                HTTP_1_1, BAD_REQUEST,
-                Unpooled.copiedBuffer("Bad Request", CharsetUtil.UTF_8));
-
-        return httpResponse;
-    }
-
-    private FullHttpResponse creatOkHttpResponse(LastHttpContent trailer, Response response) {
-        FullHttpResponse httpResponse = new DefaultFullHttpResponse(
-                HTTP_1_1, trailer.decoderResult().isSuccess() ? OK : BAD_REQUEST,
+                HTTP_1_1, OK,
                 Unpooled.copiedBuffer(response.getValue(), CharsetUtil.UTF_8));
 
         httpResponse.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/plain; charset=UTF-8");
         return httpResponse;
     }
+
+    private FullHttpResponse createBadRequestResponse(String reason) {
+        FullHttpResponse httpResponse = new DefaultFullHttpResponse(
+                HTTP_1_1, BAD_REQUEST,
+                Unpooled.copiedBuffer(String.format("Bad Request, Reason: %s", reason), CharsetUtil.UTF_8));
+        return httpResponse;
+    }
+
+
+    private void writeInternalServerErrorResponse(ChannelHandlerContext channelHandlerContext, HttpServerExceptionCode httpServerExceptionCode) {
+        FullHttpResponse fullHttpResponse = createInternalServerErrorResponse(httpServerExceptionCode);
+        channelHandlerContext.write(fullHttpResponse);
+        channelHandlerContext.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+    }
+
+    private FullHttpResponse createInternalServerErrorResponse(HttpServerExceptionCode httpServerExceptionCode) {
+        FullHttpResponse httpResponse = new DefaultFullHttpResponse(
+                HTTP_1_1, INTERNAL_SERVER_ERROR,
+                Unpooled.copiedBuffer(String.format("Internal Server Error, reason: %s", httpServerExceptionCode.name()), CharsetUtil.UTF_8));
+        return httpResponse;
+    }
+
 
     private static void send100Continue(ChannelHandlerContext ctx) {
         FullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1, CONTINUE);

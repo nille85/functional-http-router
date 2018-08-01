@@ -1,9 +1,11 @@
 package be.nille.http.router.integration.http.netty;
 
-import be.nille.http.router.domain.DefaultRouteDispatcher;
+import be.nille.http.router.domain.routedispatcher.DefaultRouteDispatcher;
 import be.nille.http.router.domain.HttpRouter;
 import be.nille.http.router.domain.HttpRouterConfiguration;
 import be.nille.http.router.domain.RouteDispatcher;
+import be.nille.http.router.domain.routematcher.DefaultRouteMatcher;
+import be.nille.http.router.domain.routematcher.DefaultRouteMatchersFactory;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoopGroup;
@@ -18,8 +20,6 @@ import org.slf4j.LoggerFactory;
 public class NettyHttpRouter implements HttpRouter {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(NettyHttpRouter.class);
-
-
     private final RouteDispatcher routeDispatcher;
     private final SslContextFactory sslContextFactory;
 
@@ -29,7 +29,12 @@ public class NettyHttpRouter implements HttpRouter {
     }
 
     public static HttpRouter create() {
-        return new NettyHttpRouter(new DefaultRouteDispatcher(), new DefaultSslContextFactory());
+        return new NettyHttpRouter(
+                new DefaultRouteDispatcher(
+                        new DefaultRouteMatcher(new DefaultRouteMatchersFactory())
+                ),
+                new DefaultSslContextFactory()
+        );
     }
 
     public void start(HttpRouterConfiguration configuration) {

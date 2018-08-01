@@ -1,0 +1,15 @@
+language: java
+
+jdk:
+   - oraclejdk8
+
+build:
+  ci:
+   #Create folders for test and code coverage
+   - mkdir -p shippable/testresults
+   - gradle clean check
+
+notifications:
+  email:
+      recipients:
+         - niels@nille.be

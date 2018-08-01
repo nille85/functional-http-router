@@ -4,7 +4,7 @@ import java.util.Arrays;
 import java.util.Optional;
 
 public enum Method {
-    GET("GET"), POST("POST");
+    GET("GET"), POST("POST"), PUT("PUT"), DELETE("DELETE"), HEAD("HEAD"), PATCH("PATCH"), OPTIONS("OPTIONS");
 
     private final String name;
 
@@ -16,7 +16,7 @@ public enum Method {
         return name;
     }
 
-    public static Optional<Method> byName(String name){
+    public static Optional<Method> byName(String name) {
         Optional<Method> methodOptional = Arrays.asList(Method.values()).stream()
                 .filter(method -> method.getName().equals(name))
                 .findFirst();

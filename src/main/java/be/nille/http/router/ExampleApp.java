@@ -18,11 +18,14 @@ public class ExampleApp {
         Collection<Route> routes = new ArrayList<>();
         routes.add(new Route.Builder()
                 .withMethod(Method.GET)
+                .withPath(Path.create("/test"))
                 .withResponseHandler(request -> Response.create(
                         String.format("Hello, you performed a %s request", request.getMethod()))
                 )
                 .build()
         );
+
+
 
         NettyHttpRouter.create().start(
                 new HttpRouterConfiguration.Builder()
